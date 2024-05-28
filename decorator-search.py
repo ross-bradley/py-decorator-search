@@ -4,6 +4,10 @@ import argparse
 import os
 import ast
 
+from lib2to3 import refactor
+
+from shutil import get_terminal_size
+
 """
   Search functions by decorators (and function names if you need to!)
 
@@ -27,7 +31,7 @@ Nice for structure and memory use (do we really care? How much Python are we par
     ]
   }
 }
-  
+
 ----
 
 Better for easy search (especially for writing the actual lambdas!) :
@@ -38,6 +42,19 @@ Better for easy search (especially for writing the actual lambdas!) :
   ...
 ]
 """
+
+# ====================================================================================================
+
+class colors:
+    DEC_NAME = '\033[1m' # '\033[38;5;231m'
+    DEC_VAL = '\033[38;5;231m'
+    PATH = '\033[38;5;101m'
+    LINE = '\033[38;5;15m'
+    CLS = '\033[38;5;28m'
+    FUNC = '\033[38;5;46m'
+    ENDC = '\033[0m'
+    BOLD = '\033[1m'
+    SEPARATOR = '\033[38;5;213m'
 
 # ====================================================================================================
 
@@ -52,7 +69,7 @@ class DecoratorSearcher(object):
         self.parse_folder(args.folder)
 
 # ----------------------------------------------------------------------------------------------------
-        
+
     def parse_folder(self, folder):
         with os.scandir(folder) as f:
             for path in f:
@@ -78,10 +95,12 @@ class DecoratorSearcher(object):
 # ----------------------------------------------------------------------------------------------------
 
     def pretty(self):
+        cols = get_terminal_size((1,1)).columns - 1
+        print(f'{colors.SEPARATOR}{"#"*cols}{colors.ENDC}')
         for entry in self.results:
-            print(f'{entry.path}:{entry.line}')
-            print('\n'.join([f'@{dec.name}({dec.value})' for dec in entry.decorators]))
-            print(f'  {entry.class_name}:{entry.function}\n--')
+            print(f'{colors.PATH}{entry.path}{colors.ENDC}:{colors.LINE}{entry.line}{colors.ENDC}')
+            print('\n'.join([f'@{colors.DEC_NAME}{dec.name}{colors.ENDC}({colors.DEC_VAL}{dec.value}{colors.ENDC})' for dec in entry.decorators]))
+            print(f'  {colors.CLS}{entry.class_name}{colors.ENDC}:{colors.FUNC}{entry.function}{colors.ENDC}\n--')
 
 # ----------------------------------------------------------------------------------------------------
 
@@ -151,7 +170,7 @@ class DecoratorSearcher(object):
     """
     Searches by partial name match:
     name: a_decorator_name
-    
+
     dec => matches
     a_decorator_name2 => does NOT match
     """
@@ -163,7 +182,7 @@ class DecoratorSearcher(object):
     """
     Searches by partial name match:
     name: a_decorator_name
-    
+
     dec => matches
     a_decorator_name2 => does NOT match
     """
@@ -175,7 +194,7 @@ class DecoratorSearcher(object):
     """
     Searches by partial value match:
     value: /users/(?P<accountType>\\w+)-(?P<userID>\\d+)/assets/products/$
-    
+
     users => matches
     /Users => does NOT match
     """
@@ -187,7 +206,7 @@ class DecoratorSearcher(object):
     """
     Searches by partial value match:
     value: /users/(?P<accountType>\\w+)-(?P<userID>\\d+)/assets/products/$
-    
+
     users => matches
     /Users => does NOT match
     """
@@ -212,6 +231,9 @@ class Module(object):
         self.results = []
         self._tree = None
 
+        fixes = ['lib2to3.fixes.fix_apply', 'lib2to3.fixes.fix_asserts', 'lib2to3.fixes.fix_basestring', 'lib2to3.fixes.fix_buffer', 'lib2to3.fixes.fix_dict', 'lib2to3.fixes.fix_except', 'lib2to3.fixes.fix_exec', 'lib2to3.fixes.fix_execfile', 'lib2to3.fixes.fix_exitfunc', 'lib2to3.fixes.fix_filter', 'lib2to3.fixes.fix_funcattrs', 'lib2to3.fixes.fix_future', 'lib2to3.fixes.fix_getcwdu', 'lib2to3.fixes.fix_has_key', 'lib2to3.fixes.fix_idioms', 'lib2to3.fixes.fix_import', 'lib2to3.fixes.fix_imports', 'lib2to3.fixes.fix_imports2', 'lib2to3.fixes.fix_input', 'lib2to3.fixes.fix_intern', 'lib2to3.fixes.fix_isinstance', 'lib2to3.fixes.fix_itertools', 'lib2to3.fixes.fix_itertools_imports', 'lib2to3.fixes.fix_long', 'lib2to3.fixes.fix_map', 'lib2to3.fixes.fix_metaclass', 'lib2to3.fixes.fix_methodattrs', 'lib2to3.fixes.fix_ne', 'lib2to3.fixes.fix_next', 'lib2to3.fixes.fix_nonzero', 'lib2to3.fixes.fix_numliterals', 'lib2to3.fixes.fix_operator', 'lib2to3.fixes.fix_paren', 'lib2to3.fixes.fix_print', 'lib2to3.fixes.fix_raise', 'lib2to3.fixes.fix_raw_input', 'lib2to3.fixes.fix_reduce', 'lib2to3.fixes.fix_reload', 'lib2to3.fixes.fix_renames', 'lib2to3.fixes.fix_repr', 'lib2to3.fixes.fix_set_literal', 'lib2to3.fixes.fix_standarderror', 'lib2to3.fixes.fix_sys_exc', 'lib2to3.fixes.fix_throw', 'lib2to3.fixes.fix_tuple_params', 'lib2to3.fixes.fix_types', 'lib2to3.fixes.fix_unicode', 'lib2to3.fixes.fix_urllib', 'lib2to3.fixes.fix_ws_comma', 'lib2to3.fixes.fix_xrange', 'lib2to3.fixes.fix_xreadlines', 'lib2to3.fixes.fix_zip']
+        self.refactor = refactor.RefactoringTool(fixes)
+
 # ----------------------------------------------------------------------------------------------------
 
     def from_results(self, results):
@@ -221,9 +243,24 @@ class Module(object):
 
     def load(self, path):
         with open(path, 'r') as fd:
-            self._tree = ast.parse(fd.read())
-        self.parse(path)
-        return self.results
+            try:
+                self._tree = ast.parse(fd.read())
+            except:
+                print(f'[2to3] Refactoring {path}')
+                fd.seek(0)
+                file_content = fd.read()
+                try:
+                    self._tree = ast.parse(str(self.refactor.refactor_string(file_content, path)))
+                except Exception as ex:
+                    print('[ERROR] Failed - skipping')
+                    print(ex)
+                    pass
+
+        if self._tree is not None:
+            self.parse(path)
+            return self.results
+        else:
+            return []
 
 # ----------------------------------------------------------------------------------------------------
 
@@ -240,7 +277,7 @@ class Module(object):
         functions = []
         for node in cls_node.body:
             match type(node):
-                case ast.FunctionDef:
+                case ast.AsyncFunctionDef|ast.FunctionDef:
                     parsed_func = self.parse_function(node, class_name=cls_node.name, class_decorators=cls_node.decorator_list)
                     parsed_func['path'] = path
                     self.results.append(parsed_func)
@@ -271,7 +308,7 @@ class Module(object):
             match type(part):
                 case ast.Attribute:
                    return '.'.join(handle_Attribute(part))
-                case ast.Name:    
+                case ast.Name:
                     return part.id
                 case _:
                     print('[ERROR] Unknown Call.func type:\n ', type(part))
@@ -339,7 +376,7 @@ class Module(object):
         # it's important that we make a copy of the class decorators! Don't just .extend(...) them otherwise we modify the class, which is bad
         decorators = [d for d in class_decorators]
         decorators.extend(fun_node.decorator_list)
-      
+
         # super simple reconstruction of the decorators so we can do a dirty grep
         # TODO - fix this filthy hack!
         decorators_parsed = []
@@ -370,6 +407,9 @@ class ObjDict(dict):
     __getattr__ = dict.get
     __setattr__ = dict.__setitem__
     __delattr__ = dict.__delitem__
+
+
+# ====================================================================================================
 
 
 # ====================================================================================================
